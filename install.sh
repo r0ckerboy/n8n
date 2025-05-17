@@ -1,12 +1,6 @@
 #!/bin/bash
 set -e
 
-### Проверка и установка Git
-if ! command -v git &>/dev/null; then
-  echo "Устанавливаем Git..."
-  apt update && apt install -y git || apk add --no-cache git
-fi
-
 ### Проверка прав
 if (( EUID != 0 )); then
   echo "❗ Скрипт должен быть запущен от root: sudo bash <(curl ...)"
@@ -50,19 +44,10 @@ fi
 ### 3. Клонирование проекта с GitHub
 echo "📥 Клонируем проект с GitHub..."
 rm -rf /opt/n8n-install
-git clone https://github.com/r0ckerboy/n8n-beget-install.git /opt/n8n-install
+git clone https://github.com/kalininlive/n8n-beget-install.git /opt/n8n-install
 cd /opt/n8n-install
 
-### 4. Создание структуры папок
-echo "📂 Создаем структуру папок..."
-mkdir -p \
-  logs \
-  backups \
-  traefik/acme \
-  n8n-tg-bot
-
-### 5. Генерация .env файлов
-echo "⚙️ Генерируем конфигурационные файлы..."
+### 4. Генерация .env файлов
 cat > ".env" <<EOF
 DOMAIN=$DOMAIN
 EMAIL=$EMAIL
@@ -71,83 +56,38 @@ N8N_ENCRYPTION_KEY=$N8N_ENCRYPTION_KEY
 N8N_EXPRESS_TRUST_PROXY=true
 TG_BOT_TOKEN=$TG_BOT_TOKEN
 TG_USER_ID=$TG_USER_ID
-POSTGRES_USER=n8n
-POSTGRES_DB=n8n
-N8N_HOST=$DOMAIN
-N8N_PROTOCOL=https
-WEBHOOK_URL=https://$DOMAIN/
 EOF
 
-cat > "n8n-tg-bot/.env" <<EOF
+cat > "bot/.env" <<EOF
 TG_BOT_TOKEN=$TG_BOT_TOKEN
 TG_USER_ID=$TG_USER_ID
 EOF
 
-chmod 600 .env n8n-tg-bot/.env
+chmod 600 .env bot/.env
 
-### 6. Настройка прав
-echo "🔒 Настраиваем права доступа..."
+### 4.1 Создание нужных директорий и логов
+mkdir -p logs backups
 touch backup.log
 chown -R 1000:1000 logs backups backup.log
-chmod -R 755 logs backups traefik/acme
+chmod -R 755 logs backups
 
-### 7. Настройка Traefik
-echo "🔧 Конфигурируем Traefik..."
-cat > "traefik/traefik.yml" <<EOF
-global:
-  sendAnonymousUsage: false
+### 5. Сборка кастомного образа n8n
+docker build -f Dockerfile.n8n -t n8n-custom:latest .
 
-entryPoints:
-  web:
-    address: ":80"
-  websecure:
-    address: ":443"
+### 6. Запуск docker compose (включая Telegram-бота)
+docker compose up -d
 
-certificatesResolvers:
-  letsencrypt:
-    acme:
-      email: $EMAIL
-      storage: /etc/traefik/acme/acme.json
-      httpChallenge:
-        entryPoint: web
-
-providers:
-  file:
-    filename: /etc/traefik/dynamic_conf.yml
-    watch: true
-
-log:
-  level: DEBUG
-EOF
-
-### 8. Запуск системы
-echo "🚀 Запускаем n8n..."
-docker compose up -d --force-recreate
-
-### 9. Проверка сертификатов
-echo "🔍 Проверка SSL-сертификата..."
-sleep 30
-docker compose logs traefik | grep -i acme
-
-### 10. Настройка cron
-echo "⏰ Настраиваем автоматические бэкапы..."
+### 7. Настройка cron
 chmod +x ./backup_n8n.sh
 (crontab -l 2>/dev/null; echo "0 2 * * * /opt/n8n-install/backup_n8n.sh >> /opt/n8n-install/backup.log 2>&1") | crontab -
 
-### 11. Уведомление в Telegram
-echo "📨 Отправляем уведомление в Telegram..."
-curl -s -X POST "https://api.telegram.org/bot$TG_BOT_TOKEN/sendMessage" \
-  -d chat_id="$TG_USER_ID" \
+### 8. Уведомление в Telegram
+curl -s -X POST https://api.telegram.org/bot$TG_BOT_TOKEN/sendMessage \
+  -d chat_id=$TG_USER_ID \
   -d text="✅ Установка n8n завершена. Домен: https://$DOMAIN"
 
-### 12. Финальный вывод
+### 9. Финальный вывод
 echo "📦 Активные контейнеры:"
 docker ps --format "table {{.Names}}\t{{.Status}}"
 
-echo "🔐 Проверьте SSL сертификат:"
-echo "openssl s_client -connect $DOMAIN:443 -servername $DOMAIN | openssl x509 -noout -dates"
-
-echo "🔄 Если сертификат не выдался, проверьте логи:"
-echo "docker compose logs traefik -f"
-
-echo "🎉 Готово! Откройте: https://$DOMAIN"
+echo "🎉 Готово! Открой: https://$DOMAIN"
