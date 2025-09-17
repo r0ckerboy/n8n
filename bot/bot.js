@@ -1,147 +1,86 @@
+#!/usr/bin/env node
+// ████████╗ ██████╗  ██████╗ ██╗     ██╗  ██╗██╗████████╗
+// ╚══██╔══╝██╔═══██╗██╔═══██╗██║     ██║ ██╔╝██║╚══██╔══╝
+//    ██║   ██║   ██║██║   ██║██║     █████╔╝ ██║   ██║
+//    ██║   ██║   ██║██║   ██║██║     ██╔═██╗ ██║   ██║
+//    ██║   ╚██████╔╝╚██████╔╝███████╗██║  ██╗██║   ██║
+//    ╚═╝    ╚═════╝  ╚═════╝ ╚══════╝╚═╝  ╚═╝╚═╝   ╚═╝
+//
+// >_ [СИСТЕМА]: NIGHT CITY ADMIN BOT v2.0.77
+// >_ [СТАТУС]: ONLINE / ПОДКЛЮЧЁН К Docker Socket
+// >_ [ПРОТОКОЛ]: Telegram API / Только указанный USER_ID
+
 const TelegramBot = require('node-telegram-bot-api');
-const { execSync, exec } = require('child_process');
-const path = require('path');
+const { exec, execSync } = require('child_process');
 const fs = require('fs');
+const path = require('path');
 
-// === Переменные окружения ===
-const token = process.env.TG_BOT_TOKEN;
-const userId = process.env.TG_USER_ID;
+// === ENV ===
+const TOKEN = process.env.TELEGRAM_BOT_TOKEN;
+const USER_ID = process.env.TELEGRAM_USER_ID;
+const DOCKER_SOCK = process.env.DOCKER_SOCKET_PATH || '/var/run/docker.sock';
 
-if (!token || !userId) {
-  console.error("❌ Не заданы необходимые переменные окружения.");
+if (!TOKEN || !USER_ID) {
+  console.error('> _ [ФЛЭТЛАЙН] Отсутствуют TELEGRAM_BOT_TOKEN или TELEGRAM_USER_ID');
   process.exit(1);
 }
 
-const bot = new TelegramBot(token, { polling: true });
+const bot = new TelegramBot(TOKEN, { polling: true });
 
-function isAuthorized(msg) {
-  return String(msg.chat.id) === String(userId);
-}
+// === УТИЛИТЫ ===
+const send = (txt) => bot.sendMessage(USER_ID, txt, { parse_mode: 'Markdown' });
+const isAuthorized = (msg) => String(msg.chat.id) === String(USER_ID);
 
-function send(text) {
-  bot.sendMessage(userId, text, { parse_mode: 'Markdown' });
-}
-// Проверка при старте бота
-try {
-  dockerCommand('ps');
-  send('🤖 Бот запущен и подключен к Docker');
-} catch (err) {
-  send(`❌ Ошибка подключения к Docker: ${err.message}`);
-  process.exit(1);
-}
-// /start — список команд
+// === КОМАНДЫ ===
 bot.onText(/\/start/, (msg) => {
   if (!isAuthorized(msg)) return;
-  send('🤖 Доступные команды:\n/status — Статус контейнеров\n/logs — Логи n8n\n/backups — Бэкап вручную\n/update — Обновление n8n');
+  send(`🤖 *NIGHT CITY ADMIN BOT*
+Доступные команды:
+/status — аптайм и контейнеры
+/logs <сервис> — логи контейнера
+/backup — запустить бэкап
+/update — обновить n8n + Postiz + SVM`);
 });
 
-const bot = new TelegramBot(token, { polling: true });
-
-// Добавляем обработку ошибок Docker
-function dockerCommand(cmd) {
-  try {
-    return execSync(`docker ${cmd}`, { timeout: 10000 }).toString().trim();
-  } catch (err) {
-    console.error(`Docker error: ${err.message}`);
-    throw new Error(`Docker command failed: ${cmd}`);
-  }
-}
-
-// Обновленный /status
 bot.onText(/\/status/, (msg) => {
   if (!isAuthorized(msg)) return;
   try {
     const uptime = execSync('uptime -p').toString().trim();
-    const containers = dockerCommand('ps --format "{{.Names}} ({{.Status}})"');
-    send(`🟢 Сервер работает\n⏱ Uptime: ${uptime}\n\n📦 Контейнеры:\n${containers}`);
-  } catch (err) {
-    send(`❌ Ошибка Docker: ${err.message}\nПроверьте: sudo systemctl status docker`);
+    const containers = execSync('docker ps --format "✅ {{.Names}} ({{.Status}})"').toString().trim();
+    send(`⏱ *Аптайм*: ${uptime}\n\n📦 *Контейнеры*:\n${containers}`);
+  } catch (e) {
+    send('❌ Ошибка при получении статуса');
   }
 });
 
-// Обновленный /logs
-bot.onText(/\/logs/, (msg) => {
+bot.onText(/\/logs (.+)/, (msg, match) => {
   if (!isAuthorized(msg)) return;
-  try {
-    const logs = dockerCommand('logs --tail=100 n8n');
-    send(`📝 Логи n8n:\n\`\`\`\n${logs.slice(-3900)}\n\`\`\``);
-  } catch (err) {
-    send(`❌ Не удалось получить логи: ${err.message}`);
-  }
-});
-      // Логи слишком длинные — сохраняем во временный файл и отправляем
-      const fs = require('fs');
-      const logPath = '/tmp/n8n_logs.txt';
-      fs.writeFileSync(logPath, stdout);
-
-      bot.sendDocument(userId, logPath, {}, {
-        caption: '📝 Логи n8n (последние 100 строк)'
-      });
-    } else {
-      send(`📝 Логи n8n:\n\`\`\`\n${trimmed}\n\`\`\``);
-    }
+  const service = match[1].trim();
+  exec(`docker logs --tail=50 ${service}`, (err, stdout, stderr) => {
+    if (err) return send(`❌ Не удалось получить логи \`${service}\``);
+    const out = (stdout || stderr).slice(-3500);
+    send(`📝 *Логи ${service}*:\n\`\`\`\n${out}\n\`\`\``);
   });
 });
 
-// /backups — запускает backup_n8n.sh
-bot.onText(/\/backups/, (msg) => {
+bot.onText(/\/backup/, (msg) => {
   if (!isAuthorized(msg)) return;
-
-  send('📦 Запускаю резервное копирование n8n...');
-
-  const backupScriptPath = path.resolve('/opt/n8n-install/backup_n8n.sh');
-
-  exec(`/bin/bash ${backupScriptPath}`, (error, stdout, stderr) => {
-    if (error) {
-      send(`❌ Ошибка при запуске backup:\n\`\`\`\n${error.message}\n\`\`\``, { parse_mode: 'Markdown' });
-      return;
-    }
-
-    if (stderr && stderr.trim()) {
-      send(`⚠️ В процессе бэкапа были предупреждения:\n\`\`\`\n${stderr}\n\`\`\``, { parse_mode: 'Markdown' });
-      return;
-    }
-
-    send('✅ Бэкап завершён. Проверьте Telegram — архив должен быть отправлен автоматически.');
+  send('📦 Запускаю бэкап...');
+  exec('/bin/bash /opt/n8n-install/backup.sh', (err, stdout, stderr) => {
+    if (err) return send('❌ Ошибка бэкапа');
+    send('✅ Бэкап завершён. Архив отправлен выше.');
   });
 });
+
 bot.onText(/\/update/, (msg) => {
   if (!isAuthorized(msg)) return;
-  
-
-// /update — сначала backup, потом обновление n8n
-bot.onText(/\/update/, (msg) => {
-  if (!isAuthorized(msg)) return;
-
-  send('⏳ Сначала делаю резервную копию перед обновлением...');
-
-  const backupScriptPath = path.resolve('/opt/n8n-install/backup_n8n.sh');
-
-  exec(`/bin/bash ${backupScriptPath}`, (error, stdout, stderr) => {
-    if (error) {
-      send(`❌ Ошибка при запуске backup:\n\`\`\`\n${error.message}\n\`\`\`\nОбновление прервано.`, { parse_mode: 'Markdown' });
-      return;
-    }
-
-    send('✅ Бэкап завершён. Начинаю обновление n8n...');
-
-    try {
-      const latest = execSync('npm view n8n version').toString().trim();
-      const current = execSync('docker exec n8n-app n8n -v').toString().trim();
-
-      if (latest === current) {
-        send(`✅ У вас уже последняя версия n8n (${current})`);
-      } else {
-        send(`⏬ Обновляю n8n с ${current} до ${latest}...`);
-        execSync('docker pull n8nio/n8n');
-        execSync('docker-compose stop n8n');
-        execSync('docker-compose rm -f n8n');
-        execSync('docker-compose up -d --no-deps --build n8n');
-        send(`✅ n8n обновлён до версии ${latest}`);
-      }
-    } catch (err) {
-      send('❌ Обновление завершилось с ошибкой');
-    }
+  send('🔄 Начинаю обновление стека...');
+  exec('/bin/bash /opt/n8n-install/update.sh', (err, stdout, stderr) => {
+    if (err) return send('❌ Ошибка обновления');
+    send(`✅ Обновление завершено:\n\`\`\`\n${stdout.slice(-1000)}\n\`\`\``);
   });
 });
 
+// === ИНИЦИАЛИЗАЦИЯ ===
+console.log('> _ [СИСТЕМА] NIGHT CITY BOT ONLINE');
+send('> _ [СИСТЕМА] Бот подключён к Docker Socket и готов к работе.');
