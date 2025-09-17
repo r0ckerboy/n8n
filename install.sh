@@ -23,10 +23,10 @@ echo -e "${C_CYAN}"
 cat << "EOF"
   _   _   _   _   _   _   _     _   _    _   _   _ 
  / \ / \ / \ / \ / \ / \ / \   / \ / \  / \ / \ / \ 
-( K | O | N | T | E | N | T ) ( Z | A )( V | O | D )    
+( K | O | N | T | E | N | T ) ( З | A )( В | O | Д )    
  \_/ \_/ \_/ \_/ \_/ \_/ \_/   \_/ \_/  \_/ \_/ \_/     
 
-> [СИСТЕМА ОНЛАЙН]: K O H T E N T - Z A V O D
+> [СИСТЕМА ОНЛАЙН]: K O H T E N T - З A В O D
 > [СТАТУС]: ЗАГРУЗКА... // NIGHT CITY v2.0.77
 EOF
 echo -e "${C_NC}"
@@ -34,13 +34,13 @@ echo "----------------------------------------------------"
 
 # === ИМПЛАНТЫ ===
 log_jack_in "Сканирую систему на необходимое железо..."
-apt-get update -y >/dev/null 2>&1
-apt-get install -y git curl zip unzip openssl >/dev/null 2>&1
+apt-get update -y
+apt-get install -y git curl zip unzip openssl
 
 # === DOCKER ===
 if ! command -v docker &>/dev/null; then
   log_jack_in "Устанавливаю Docker-имплант..."
-  curl -fsSL https://get.docker.com | sh >/dev/null 2>&1
+  curl -fsSL https://get.docker.com | sh
   systemctl enable --now docker
 fi
 
@@ -58,7 +58,7 @@ if [ -d "$INSTALL_DIR" ]; then
   rm -rf "$INSTALL_DIR"
 fi
 log_jack_in "Качаю чертежи из Сети..."
-git clone https://github.com/r0ckerboy/n8n.git "$INSTALL_DIR" >/dev/null 2>&1
+git clone https://github.com/r0ckerboy/n8n.git "$INSTALL_DIR"
 cd "$INSTALL_DIR"
 
 # === ВВОД ДАННЫХ ===
@@ -95,7 +95,7 @@ chmod 600 data/letsencrypt/acme.json
 
 # === СБОРКА И ЗАПУСК ===
 log_jack_in "Компилирую кастомного демона n8n..."
-docker compose build >/dev/null 2>&1
+docker compose build
 log_jack_in "Пробуждаю демонов..."
 docker compose up -d
 
