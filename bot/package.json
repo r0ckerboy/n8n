@@ -1,12 +1,15 @@
 {
-  "name": "n8n-admin-tg-bot",
-  "version": "1.0.0",
+  "name": "kontent-zavod-bot",
+  "version": "2.0.77",
+  "description": "Night City Telegram-бот для управления стеком n8n + Postiz + SVM",
   "main": "bot.js",
   "scripts": {
     "start": "node bot.js"
   },
   "dependencies": {
-    "dotenv": "^16.3.1",
-    "node-telegram-bot-api": "^0.61.0"
-  }
+    "node-telegram-bot-api": "^0.64.0",
+    "dotenv": "^16.3.1"
+  },
+  "author": "r0ckerboy",
+  "license": "MIT"
 }
