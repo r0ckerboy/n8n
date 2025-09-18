@@ -1,9 +1,3 @@
-### 📄 Файл 7: `README.md` — **Cyberpunk 2077 Edition**
-
-Скопируй это в **корень репо** как `README.md`:
-
----
-
 ```markdown
 # KONTENT-ZAVOD 🌆  
 **Один скрипт — весь стек: n8n + Postiz + Short Video Maker + Telegram-бот + бэкапы.**
