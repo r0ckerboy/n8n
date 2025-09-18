@@ -1,5 +1,3 @@
-version: "3.8"
-
 services:
   traefik:
     image: traefik:v2.11
@@ -9,7 +7,6 @@ services:
       - "--api.dashboard=true"
       - "--providers.docker=true"
       - "--providers.docker.exposedbydefault=false"
-      - "--providers.docker.network=web"
       - "--entrypoints.web.address=:80"
       - "--entrypoints.websecure.address=:443"
       - "--certificatesresolvers.letsencrypt.acme.email=${LETSENCRYPT_EMAIL}"
@@ -33,26 +30,27 @@ services:
       - web
 
   postgres:
-    image: postgres:16-alpine
-    container_name: postgres
+    image: postgres:17-alpine
+    container_name: postiz-postgres
     restart: unless-stopped
     environment:
-      POSTGRES_DB: ${POSTGRES_DB:-main_db}
-      POSTGRES_USER: ${POSTGRES_USER:-admin}
+      POSTGRES_USER: postiz-user
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: postiz-db-local
     volumes:
       - ./data/postgres:/var/lib/postgresql/data
     networks:
+      - web
       - internal
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-admin} -d ${POSTGRES_DB:-main_db}"]
+      test: ["CMD-SHELL", "pg_isready -U postiz-user -d postiz-db-local"]
       interval: 10s
       timeout: 5s
       retries: 5
 
   redis:
-    image: redis:7-alpine
-    container_name: redis
+    image: redis:7.2-alpine
+    container_name: postiz-redis
     restart: unless-stopped
     volumes:
       - ./data/redis:/data
@@ -72,8 +70,8 @@ services:
       - DB_TYPE=postgresdb
       - DB_POSTGRESDB_HOST=postgres
       - DB_POSTGRESDB_PORT=5432
-      - DB_POSTGRESDB_DATABASE=${POSTGRES_DB:-main_db}
-      - DB_POSTGRESDB_USER=${POSTGRES_USER:-admin}
+      - DB_POSTGRESDB_DATABASE=postiz-db-local
+      - DB_POSTGRESDB_USER=postiz-user
       - DB_POSTGRESDB_PASSWORD=${POSTGRES_PASSWORD}
       - N8N_HOST=n8n.${BASE_DOMAIN}
       - WEBHOOK_URL=https://n8n.${BASE_DOMAIN}/
@@ -84,8 +82,6 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-      traefik:
-        condition: service_started
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.n8n.rule=Host(`n8n.${BASE_DOMAIN}`)"
@@ -101,20 +97,18 @@ services:
     container_name: postiz
     restart: unless-stopped
     environment:
-      - DATABASE_URL=postgresql://${POSTGRES_USER:-admin}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-main_db}?schema=public
-      - REDIS_URL=redis://redis:6379
-      - MAIN_URL=https://postiz.${BASE_DOMAIN}
-      - FRONTEND_URL=https://postiz.${BASE_DOMAIN}
-      - NEXT_PUBLIC_BACKEND_URL=https://postiz.${BASE_DOMAIN}/api
-      - JWT_SECRET=${N8N_ENCRYPTION_KEY}
-      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID:-}
-      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET:-}
-      - STORAGE_PROVIDER=local
-      - UPLOAD_DIRECTORY=/uploads
-      - NEXT_PUBLIC_UPLOAD_DIRECTORY=/uploads
-      - BACKEND_INTERNAL_URL=http://postiz:3000
-      - IS_GENERAL=true
-      - DISABLE_REGISTRATION=false
+      MAIN_URL: "https://postiz.${BASE_DOMAIN}"
+      FRONTEND_URL: "https://postiz.${BASE_DOMAIN}"
+      NEXT_PUBLIC_BACKEND_URL: "https://postiz.${BASE_DOMAIN}/api"
+      JWT_SECRET: ${N8N_ENCRYPTION_KEY}
+      DATABASE_URL: "postgresql://postiz-user:${POSTGRES_PASSWORD}@postgres:5432/postiz-db-local"
+      REDIS_URL: "redis://redis:6379"
+      BACKEND_INTERNAL_URL: "http://localhost:3000"
+      IS_GENERAL: "true"
+      DISABLE_REGISTRATION: "false"
+      STORAGE_PROVIDER: "local"
+      UPLOAD_DIRECTORY: "/uploads"
+      NEXT_PUBLIC_UPLOAD_DIRECTORY: "/uploads"
     volumes:
       - ./data/postiz-uploads:/uploads
     depends_on:
@@ -122,8 +116,6 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-      traefik:
-        condition: service_started
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.postiz.rule=Host(`postiz.${BASE_DOMAIN}`)"
