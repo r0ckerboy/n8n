@@ -14,6 +14,7 @@ services:
       - "--certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=web"
       - "--entrypoints.web.http.redirections.entrypoint.to=websecure"
       - "--entrypoints.web.http.redirections.entrypoint.scheme=https"
+      - "--log.level=DEBUG"
     ports:
       - "80:80"
       - "443:443"
@@ -26,6 +27,8 @@ services:
       - "traefik.http.routers.traefik-dashboard.service=api@internal"
       - "traefik.http.routers.traefik-dashboard.entrypoints=websecure"
       - "traefik.http.routers.traefik-dashboard.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.traefik-dashboard.middlewares=auth"
+      - "traefik.http.middlewares.auth.basicauth.users=admin:$$2y$$10$$..."  # Сгенерируй пароль через htpasswd
     networks:
       - web
 
@@ -40,7 +43,6 @@ services:
     volumes:
       - ./data/postgres:/var/lib/postgresql/data
     networks:
-      - web
       - internal
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postiz-user -d postiz-db-local"]
@@ -52,6 +54,7 @@ services:
     image: redis:7.2-alpine
     container_name: postiz-redis
     restart: unless-stopped
+    command: redis-server --appendonly yes
     volumes:
       - ./data/redis:/data
     networks:
@@ -70,15 +73,24 @@ services:
       - DB_TYPE=postgresdb
       - DB_POSTGRESDB_HOST=postgres
       - DB_POSTGRESDB_PORT=5432
-      - DB_POSTGRESDB_DATABASE=postiz-db-local
+      - DB_POSTGRESDB_DATABASE=n8n
       - DB_POSTGRESDB_USER=postiz-user
       - DB_POSTGRESDB_PASSWORD=${POSTGRES_PASSWORD}
+      - DB_POSTGRESDB_SCHEMA=public
       - N8N_HOST=n8n.${BASE_DOMAIN}
+      - N8N_PORT=5678
+      - N8N_PROTOCOL=https
       - WEBHOOK_URL=https://n8n.${BASE_DOMAIN}/
+      - N8N_EDITOR_BASE_URL=https://n8n.${BASE_DOMAIN}/
       - GENERIC_TIMEZONE=${TZ:-Europe/Moscow}
       - N8N_ENCRYPTION_KEY=${N8N_ENCRYPTION_KEY}
+      - EXECUTIONS_DATA_PRUNE=true
+      - EXECUTIONS_DATA_MAX_AGE=168
+      - N8N_BASIC_AUTH_ACTIVE=false
+      - N8N_METRICS=true
     volumes:
       - ./data/n8n:/home/node/.n8n
+      - /var/run/docker.sock:/var/run/docker.sock:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -86,8 +98,11 @@ services:
       - "traefik.enable=true"
       - "traefik.http.routers.n8n.rule=Host(`n8n.${BASE_DOMAIN}`)"
       - "traefik.http.routers.n8n.entrypoints=websecure"
+      - "traefik.http.routers.n8n.tls=true"
       - "traefik.http.routers.n8n.tls.certresolver=letsencrypt"
       - "traefik.http.services.n8n.loadbalancer.server.port=5678"
+      - "traefik.http.routers.n8n.middlewares=n8n-headers"
+      - "traefik.http.middlewares.n8n-headers.headers.customRequestHeaders.X-Forwarded-Proto=https"
     networks:
       - web
       - internal
@@ -103,7 +118,7 @@ services:
       JWT_SECRET: ${N8N_ENCRYPTION_KEY}
       DATABASE_URL: "postgresql://postiz-user:${POSTGRES_PASSWORD}@postgres:5432/postiz-db-local"
       REDIS_URL: "redis://redis:6379"
-      BACKEND_INTERNAL_URL: "http://localhost:3000"
+      BACKEND_INTERNAL_URL: "http://postiz:3000"
       IS_GENERAL: "true"
       DISABLE_REGISTRATION: "false"
       STORAGE_PROVIDER: "local"
@@ -120,6 +135,7 @@ services:
       - "traefik.enable=true"
       - "traefik.http.routers.postiz.rule=Host(`postiz.${BASE_DOMAIN}`)"
       - "traefik.http.routers.postiz.entrypoints=websecure"
+      - "traefik.http.routers.postiz.tls=true"
       - "traefik.http.routers.postiz.tls.certresolver=letsencrypt"
       - "traefik.http.services.postiz.loadbalancer.server.port=3000"
     networks:
@@ -127,26 +143,37 @@ services:
       - internal
 
   short-video-maker:
-    image: gyoridavid/short-video-maker:latest-tiny
+    image: gyoridavid/short-video-maker:latest
     container_name: short-video-maker
     restart: unless-stopped
     environment:
       - PEXELS_API_KEY=${PEXELS_API_KEY}
-      - LANGUAGE=${SVM_LANGUAGE:-ru}
-      - WHISPER_MODEL=${SVM_WHISPER_MODEL:-base}
-      - voice=${SVM_VOICE:-baya}
+      - LANGUAGE=ru
+      - WHISPER_MODEL=${SVM_WHISPER_MODEL:-medium}
+      - WHISPER_LANGUAGE=ru
+      - voice=ru-RU-Wavenet-B
+      - TTS_PROVIDER=google
+      - SUBTITLE_LANGUAGE=ru
+      - SUBTITLE_ENABLED=true
+      - VIDEO_WIDTH=1080
+      - VIDEO_HEIGHT=1920
+      - VIDEO_FPS=30
+      - VIDEO_BITRATE=8000k
     volumes:
       - ./data/videos:/app/data/videos
       - ./data/videos:/app/public/videos
-      - ./data/whisper-models:/app/data/libs/whisper/models:ro
+      - ./data/whisper-models:/app/data/libs/whisper/models
+      - ./data/svm-temp:/tmp
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.svm.rule=Host(`svm.${BASE_DOMAIN}`)"
       - "traefik.http.routers.svm.entrypoints=websecure"
+      - "traefik.http.routers.svm.tls=true"
       - "traefik.http.routers.svm.tls.certresolver=letsencrypt"
       - "traefik.http.services.svm.loadbalancer.server.port=3123"
     networks:
       - web
+      - internal
 
   bot:
     build: ./bot
@@ -159,8 +186,8 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - ./data/backups:/opt/n8n-install/backups
-      - ./update.sh:/opt/n8n-install/update.sh
-      - ./backup.sh:/opt/n8n-install/backup.sh
+      - ./update.sh:/opt/n8n-install/update.sh:ro
+      - ./backup.sh:/opt/n8n-install/backup.sh:ro
     networks:
       - internal
 
